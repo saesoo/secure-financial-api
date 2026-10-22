@@ -4,6 +4,8 @@ const jwt = require('jsonwebtoken');
 const users = require('../store/users');
 const validate = require('../middleware/validate');
 const { registerSchema, loginSchema } = require('../schemas/auth');
+const refreshTokens = require('../store/refreshTokens');
+
 
 
 const router = express.Router();
@@ -60,11 +62,14 @@ router.post('/login', validate(loginSchema), async (req, res) => {
 
     req.log.info({ event: 'login_success', userId: user.id }, 'Login succeeded');
 
+    const refreshToken = await refreshTokens.create(user.id);
+
     res.status(200).json({
         status: 'success',
         token: signToken(user),
         tokenType: 'Bearer',
-        expiresIn: process.env.JWT_EXPIRES_IN || '15m'
+        expiresIn: process.env.JWT_EXPIRES_IN || '15m',
+        refreshToken
     });
 });
 
