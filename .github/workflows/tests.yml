@@ -1,0 +1,48 @@
+name: Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    # a throwaway PostgreSQL server that exists only while this job runs
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: finapi_app
+          POSTGRES_PASSWORD: ci_only_password
+          POSTGRES_DB: finapi_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U finapi_app -d finapi_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    # test-only values: this database and secret are thrown away after the run
+    env:
+      NODE_ENV: test
+      JWT_SECRET: ci-only-secret-for-tests-not-used-anywhere-else-0123456789
+      JWT_EXPIRES_IN: 15m
+      DATABASE_URL: postgres://finapi_app:ci_only_password@localhost:5432/finapi_test
+      ALLOWED_ORIGINS: http://localhost:5173
+      LOG_LEVEL: silent
+      RATE_LIMIT_MAX: '100000'
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - name: Create tables
+        run: psql "$DATABASE_URL" -f schema.sql
+      - name: Run tests
+        run: npm test
