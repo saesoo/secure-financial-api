@@ -9,6 +9,7 @@ const authenticate = require('./middleware/authenticate');
 const limiter = require('./middleware/rateLimiter');
 const helmet = require('helmet');
 const { notFound, errorHandler } = require('./middleware/errorHandler');
+const accountRoutes = require('./routes/accounts');
 
 
 
@@ -17,6 +18,12 @@ if (!process.env.JWT_SECRET || process.env.JWT_SECRET.length < 32) {
     console.error('JWT_SECRET is missing or too short (need 32+ characters). Check your .env file.');
     process.exit(1);
 }
+
+if (!process.env.DATABASE_URL) {
+    console.error('DATABASE_URL is missing. Check your .env file.');
+    process.exit(1);
+}
+
 
 const allowedOrigins = (process.env.ALLOWED_ORIGINS || '')
     .split(',')
@@ -30,6 +37,8 @@ app.use(cors({ origin: allowedOrigins}));
 app.use(limiter);
 app.use(express.json({ limit: '10kb' }));
 app.use('/api/auth', authRoutes);
+app.use('/api/accounts', accountRoutes);
+
 
 // example protected route: only works with a valid token
 app.get('/api/me', authenticate, (req, res) => {

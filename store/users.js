@@ -1,15 +1,20 @@
-// temporary in-memory user store; replace with database queries later
-const users = new Map(); // email -> { id, email, passwordHash }
-let nextId = 1;
+const pool = require('../db');
 
-function findByEmail(email) {
-    return users.get(email);
+async function findByEmail(email) {
+    const result = await pool.query(
+        'SELECT id, email, password_hash FROM users WHERE email = $1',
+        [email]
+    );
+    return result.rows[0]; // undefined if no user matched
 }
 
-function create(email, passwordHash) {
-    const user = { id: nextId++, email, passwordHash };
-    users.set(email, user);
-    return user;
+async function create(email, passwordHash) {
+    const result = await pool.query(
+        'INSERT INTO users (email, password_hash) VALUES ($1, $2) RETURNING id, email',
+        [email, passwordHash]
+    );
+    return result.rows[0];
 }
 
 module.exports = { findByEmail, create };
+

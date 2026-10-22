@@ -2,6 +2,9 @@ const express = require('express');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const users = require('../store/users');
+const validate = require('../middleware/validate');
+const { registerSchema, loginSchema } = require('../schemas/auth');
+
 
 const router = express.Router();
 
@@ -10,15 +13,6 @@ const BCRYPT_ROUNDS = 12;
 // whether or not an account exists (prevents user enumeration by timing)
 const DUMMY_HASH = bcrypt.hashSync('dummy-password', BCRYPT_ROUNDS);
 
-function validCredentials(email, password) {
-    return (
-        typeof email === 'string' &&
-        typeof password === 'string' &&
-        /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) &&
-        password.length >= 12 &&
-        password.length <= 72 // bcrypt ignores anything past 72 bytes
-    );
-}
 
 function signToken(user) {
     return jwt.sign(
@@ -28,36 +22,34 @@ function signToken(user) {
     );
 }
 
-router.post('/register', async (req, res) => {
-    const { email, password } = req.body || {};
+router.post('/register', validate(registerSchema), async (req, res) => {
+    const { email, password } = req.body;
 
-    if (!validCredentials(email, password)) {
-        return res.status(400).json({
-            status: 'error',
-            message: 'Provide a valid email and a password of 12-72 characters.'
-        });
-    }
-
-    const normalized = email.trim().toLowerCase();
-    if (users.findByEmail(normalized)) {
+    if (await users.findByEmail(email)) {
         return res.status(409).json({ status: 'error', message: 'Unable to register with those details.' });
     }
 
     const passwordHash = await bcrypt.hash(password, BCRYPT_ROUNDS);
-    const user = users.create(normalized, passwordHash);
+
+    let user;
+    try {
+        user = await users.create(email, passwordHash);
+    } catch (err) {
+        // 23505 = unique violation: someone registered this email between our check and insert
+        if (err.code === '23505') {
+            return res.status(409).json({ status: 'error', message: 'Unable to register with those details.' });
+        }
+        throw err;
+    }
 
     res.status(201).json({ status: 'success', user: { id: user.id, email: user.email } });
 });
 
-router.post('/login', async (req, res) => {
-    const { email, password } = req.body || {};
+router.post('/login', validate(loginSchema), async (req, res) => {
+    const { email, password } = req.body;
 
-    if (typeof email !== 'string' || typeof password !== 'string') {
-        return res.status(400).json({ status: 'error', message: 'Email and password are required.' });
-    }
-
-    const user = users.findByEmail(email.trim().toLowerCase());
-    const match = await bcrypt.compare(password, user ? user.passwordHash : DUMMY_HASH);
+    const user = await users.findByEmail(email);
+    const match = await bcrypt.compare(password, user ? user.password_hash : DUMMY_HASH);
 
     if (!user || !match) {
         return res.status(401).json({ status: 'error', message: 'Invalid email or password.' });
@@ -70,5 +62,7 @@ router.post('/login', async (req, res) => {
         expiresIn: process.env.JWT_EXPIRES_IN || '15m'
     });
 });
+
+
 
 module.exports = router;
