@@ -3,7 +3,7 @@ const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const users = require('../store/users');
 const validate = require('../middleware/validate');
-const { registerSchema, loginSchema } = require('../schemas/auth');
+const { registerSchema, loginSchema, refreshSchema } = require('../schemas/auth');
 const refreshTokens = require('../store/refreshTokens');
 
 
@@ -73,6 +73,46 @@ router.post('/login', validate(loginSchema), async (req, res) => {
     });
 });
 
+router.post('/refresh', validate(refreshSchema), async (req, res) => {
+    const result = await refreshTokens.rotate(req.body.refreshToken);
 
+    // the client gets the same answer for every kind of failure, so it learns nothing
+    if (result.status === 'reuse_detected') {
+        req.log.warn(
+            { event: 'refresh_token_reuse_detected', userId: result.userId, ip: req.ip },
+            'Refresh token reuse: all sessions revoked'
+        );
+        return res.status(401).json({ status: 'error', message: 'Invalid or expired refresh token.' });
+    }
+
+    if (result.status === 'invalid') {
+        req.log.warn({ event: 'refresh_token_rejected', ip: req.ip }, 'Refresh token rejected');
+        return res.status(401).json({ status: 'error', message: 'Invalid or expired refresh token.' });
+    }
+
+    req.log.info({ event: 'token_refreshed', userId: result.user.id }, 'Access token refreshed');
+
+    res.status(200).json({
+        status: 'success',
+        token: signToken(result.user),
+        tokenType: 'Bearer',
+        expiresIn: process.env.JWT_EXPIRES_IN || '15m',
+        refreshToken: result.token
+    });
+});
+
+
+
+
+router.post('/logout', validate(refreshSchema), async (req, res) => {
+    const userId = await refreshTokens.revoke(req.body.refreshToken);
+
+    if (userId) {
+        req.log.info({ event: 'logout', userId }, 'User logged out');
+    }
+
+    // same answer whether or not the token existed, so nobody can use this route to probe tokens
+    res.status(200).json({ status: 'success', message: 'Logged out.' });
+});
 
 module.exports = router;

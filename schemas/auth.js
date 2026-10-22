@@ -19,4 +19,12 @@ const loginSchema = z
     })
     .strict();
 
-module.exports = { registerSchema, loginSchema };
+// refresh: just the token string
+const refreshSchema = z
+    .object({
+        refreshToken: z.string().min(20).max(200)
+    })
+    .strict();
+
+
+module.exports = { registerSchema, loginSchema, refreshSchema };
