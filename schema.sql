@@ -15,12 +15,15 @@ CREATE TABLE accounts (
 );
 
 CREATE TABLE transactions (
-    id         BIGSERIAL PRIMARY KEY,
-    account_id BIGINT NOT NULL REFERENCES accounts(id) ON DELETE RESTRICT,
-    amount     BIGINT NOT NULL CHECK (amount > 0),
-    type       TEXT NOT NULL CHECK (type IN ('deposit', 'withdrawal')),
-    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    id              BIGSERIAL PRIMARY KEY,
+    account_id      BIGINT NOT NULL REFERENCES accounts(id) ON DELETE RESTRICT,
+    amount          BIGINT NOT NULL CHECK (amount > 0),
+    type            TEXT NOT NULL CHECK (type IN ('deposit', 'withdrawal')),
+    idempotency_key TEXT NOT NULL,
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+    UNIQUE (account_id, idempotency_key)
 );
+
 
 CREATE INDEX idx_accounts_user_id ON accounts(user_id);
 CREATE INDEX idx_transactions_account_id ON transactions(account_id);
