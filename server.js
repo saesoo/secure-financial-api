@@ -6,6 +6,11 @@ const express = require('express');
 const cors = require('cors');
 const authRoutes = require('./routes/auth');
 const authenticate = require('./middleware/authenticate');
+const limiter = require('./middleware/rateLimiter');
+const helmet = require('helmet');
+const { notFound, errorHandler } = require('./middleware/errorHandler');
+
+
 
 // refuse to start without a strong signing secret
 if (!process.env.JWT_SECRET || process.env.JWT_SECRET.length < 32) {
@@ -13,11 +18,17 @@ if (!process.env.JWT_SECRET || process.env.JWT_SECRET.length < 32) {
     process.exit(1);
 }
 
+const allowedOrigins = (process.env.ALLOWED_ORIGINS || '')
+    .split(',')
+    .map((origin) => origin.trim())
+    .filter(Boolean);
+
 const app = express();
 
-app.use(cors());
+app.use(helmet());
+app.use(cors({ origin: allowedOrigins}));
+app.use(limiter);
 app.use(express.json({ limit: '10kb' }));
-
 app.use('/api/auth', authRoutes);
 
 // example protected route: only works with a valid token
@@ -39,6 +50,9 @@ app.get('/api/health', (req, res) => {
     console.log(`Response time: ${(diff[0] * 1e9 + diff[1]) / 1e6} ms`);
 
 });
+
+app.use(notFound);
+app.use(errorHandler);
 
 // start the server
 const PORT = process.env.PORT || 3000;
