@@ -40,8 +40,10 @@ router.post('/register', validate(registerSchema), async (req, res) => {
             return res.status(409).json({ status: 'error', message: 'Unable to register with those details.' });
         }
         throw err;
-    }
 
+    }
+    
+    req.log.info({ event: 'register_success', userId: user.id }, 'User registered');
     res.status(201).json({ status: 'success', user: { id: user.id, email: user.email } });
 });
 
@@ -52,8 +54,11 @@ router.post('/login', validate(loginSchema), async (req, res) => {
     const match = await bcrypt.compare(password, user ? user.password_hash : DUMMY_HASH);
 
     if (!user || !match) {
+        req.log.warn({ event: 'login_failed', ip: req.ip }, 'Login failed');
         return res.status(401).json({ status: 'error', message: 'Invalid email or password.' });
     }
+
+    req.log.info({ event: 'login_success', userId: user.id }, 'Login succeeded');
 
     res.status(200).json({
         status: 'success',

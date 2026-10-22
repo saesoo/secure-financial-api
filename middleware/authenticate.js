@@ -6,6 +6,7 @@ function authenticate(req, res, next) {
     const [scheme, token] = header.split(' ');
 
     if (scheme !== 'Bearer' || !token) {
+        req.log.warn({ event: 'auth_missing_token', ip: req.ip }, 'Request without credentials');
         return res.status(401).json({ status: 'error', message: 'Authentication required.' });
     }
 
@@ -16,6 +17,7 @@ function authenticate(req, res, next) {
         next();
     } catch (err) {
         // same message for expired, malformed, or tampered tokens
+        req.log.warn({ event: 'auth_invalid_token', reason: err.name, ip: req.ip }, 'Rejected token');
         return res.status(401).json({ status: 'error', message: 'Invalid or expired token.' });
     }
 }

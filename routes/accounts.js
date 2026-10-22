@@ -31,6 +31,10 @@ router.get('/:id', validate(idParamSchema, 'params'), async (req, res) => {
     const account = await accounts.findByIdForUser(req.params.id, req.user.id);
 
     if (!account) {
+        req.log.warn(
+            { event: 'account_not_found_or_forbidden', userId: req.user.id, accountId: req.params.id },
+            'Account lookup failed'
+        );
         return res.status(404).json({ status: 'error', message: 'Not found.' });
     }
 
@@ -54,9 +58,17 @@ router.post(
         });
 
         if (result.status === 'not_found') {
+            req.log.warn(
+                { event: 'account_not_found_or_forbidden', userId: req.user.id, accountId: req.params.id },
+                'Account lookup failed'
+            );
             return res.status(404).json({ status: 'error', message: 'Not found.' });
         }
         if (result.status === 'insufficient_funds') {
+            req.log.warn(
+                { event: 'insufficient_funds', userId: req.user.id, accountId: req.params.id, amount },
+                'Withdrawal refused'
+            );
             return res.status(422).json({ status: 'error', message: 'Insufficient funds.' });
         }
         if (result.status === 'key_conflict') {
@@ -74,6 +86,18 @@ router.post(
             });
         }
 
+        req.log.info(
+            {
+                event: 'transaction_created',
+                userId: req.user.id,
+                accountId: req.params.id,
+                type,
+                amount,
+                transactionId: result.transaction.id
+            },
+            'Transaction recorded'
+        );
+
         res.status(201).json({
             status: 'success',
             transaction: result.transaction,
@@ -90,6 +114,10 @@ router.get(
         const account = await accounts.findByIdForUser(req.params.id, req.user.id);
 
         if (!account) {
+            req.log.warn(
+                { event: 'account_not_found_or_forbidden', userId: req.user.id, accountId: req.params.id },
+                'Account lookup failed'
+            );
             return res.status(404).json({ status: 'error', message: 'Not found.' });
         }
 
@@ -99,7 +127,5 @@ router.get(
         res.status(200).json({ status: 'success', transactions: list });
     }
 );
-
-
 
 module.exports = router;

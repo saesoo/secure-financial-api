@@ -7,25 +7,28 @@ function notFound(req, res) {
 
 }
 
-// catches every error in the app
-// the four parameters are what tell Express this is an error handler
-function errorHandler (err, req, res, next) {
-    // full details stay in the server terminal only, never in the response
-    console.error(err);
-    
+function errorHandler(err, req, res, next) {
+    const status = err.status || err.statusCode;
+    const isClientError = status >= 400 && status < 500;
+
+    // 4xx are already logged as warnings by the request logger;
+    // unexpected errors get the full details and stack trace here
+    if (!isClientError) {
+        req.log.error({ err }, 'Unhandled error');
+    }
+
     // if a response is already partly sent, let Express finish/close it
     if (res.headersSent) {
         return next(err);
     }
 
-    // client mistakes carry a 4xx status 
-    const status = err.status || err.statusCode;
-    if (status >= 400 && status < 500) {
+    if (isClientError) {
         const message = status === 413 ? 'Request too large.' : 'Invalid request.';
-        return res.status(status).json({status: 'error', message});
-    
+        return res.status(status).json({ status: 'error', message });
     }
-    res.status(500).json({status: 'error', message: 'Internal server error.'});
+
+    res.status(500).json({ status: 'error', message: 'Internal server error.' });
 }
+
 
 module.exports = { notFound, errorHandler };
