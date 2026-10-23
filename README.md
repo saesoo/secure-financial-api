@@ -3,7 +3,9 @@
 ![Tests](https://github.com/saesoo/secure-financial-api/actions/workflows/tests.yml/badge.svg)
 ![Security checks](https://github.com/saesoo/secure-financial-api/actions/workflows/security.yml/badge.svg)
 
-A REST API for financial data built with Node.js, Express and PostgreSQL. Users register, log in with JWTs, open accounts, and make deposits and withdrawals. The project is built around one question: how do you handle money and personal data safely? Every security decision below is covered by an automated test.
+A REST API for financial data built with Node.js, Express and PostgreSQL. Users register, log in with JWTs, open accounts, and make deposits and withdrawals. The project is built around one question: how do you handle money and personal data safely? Every security decision below is covered by an automated test, and the API is deployed on AWS EC2 behind nginx with HTTPS.
+
+Live health check: `https://api.annelisesoonyadeth.dev/api/health`
 
 ## Highlights
 
@@ -14,6 +16,7 @@ A REST API for financial data built with Node.js, Express and PostgreSQL. Users 
 - Rate limiting, secure headers, restricted CORS, and error responses that never leak internals
 - Structured audit logging with secrets redacted
 - Automated tests, dependency auditing and CI on every push
+- Deployed to AWS EC2 (Ubuntu) behind nginx with a Let's Encrypt certificate, running as a systemd service
 
 ## Security measures
 
@@ -24,18 +27,20 @@ Mapped to the [OWASP API Security Top 10 (2023)](https://owasp.org/API-Security/
 | API1: Broken object level authorization | Every account query includes `AND user_id = $2`. Another user's account returns the same `404` as one that does not exist. |
 | API2: Broken authentication | bcrypt (12 rounds) password hashing, algorithm pinned to HS256, 15-minute access tokens, single-use refresh tokens that are stored only as SHA-256 hashes, and reuse of a refresh token revokes all of that user's sessions. Login responds identically and takes similar time for unknown users and wrong passwords. |
 | API3: Broken object property level authorization | Request schemas are strict, so unexpected fields (`role`, `balance`, ...) are rejected, which blocks mass assignment. |
-| API4: Unrestricted resource consumption | Per-IP rate limiting, a 10 KB body limit, and a capped page size on listings. |
+| API4: Unrestricted resource consumption | Per-IP rate limiting, a 10 KB body limit (also enforced by nginx), and a capped page size on listings. |
 | API6: Unrestricted access to sensitive business flows | Withdrawals lock the account row inside a database transaction, so simultaneous requests cannot overdraw it. A required `Idempotency-Key` stops duplicate payments on retries. Amounts are positive integers with a per-transaction cap. A `CHECK (balance >= 0)` constraint is the last line of defense. |
-| API8: Security misconfiguration | `helmet` headers, no `X-Powered-By`, CORS limited to an allow-list of origins, and a central error handler that returns generic messages (no stack traces). |
+| API8: Security misconfiguration | `helmet` headers, no `X-Powered-By`, nginx version hidden, CORS limited to an allow-list of origins, and a central error handler that returns generic messages (no stack traces). |
+| Transport security | HTTPS only: nginx terminates TLS (TLS 1.3, Let's Encrypt certificate renewed automatically), HTTP redirects to HTTPS, and `Strict-Transport-Security` is sent. |
+| Network exposure | The EC2 security group allows only ports 80 and 443 from the internet and SSH from a single IP. The app and PostgreSQL listen on `127.0.0.1` only. |
 | Injection | Parameterized queries only. Inputs are also validated before they reach the database. |
-| Logging and monitoring | Structured JSON logs (pino) with `Authorization` headers and password fields redacted. Security events are logged: failed logins, rejected tokens, access to accounts the user does not own, refused withdrawals, rate-limit hits and refresh-token reuse. |
+| Logging and monitoring | Structured JSON logs (pino) with `Authorization` headers and password fields redacted, and the real client IP recorded behind the proxy. Security events are logged: failed logins, rejected tokens, access to accounts the user does not own, refused withdrawals, rate-limit hits and refresh-token reuse. |
 | Vulnerable components | `npm audit` and Dependabot run in CI, and installs use the lock file (`npm ci`). |
 
 Not applicable here: API5 (no admin or role-based functions), API7 (the API makes no outbound requests on behalf of users), API9 and API10.
 
 ## Tech stack
 
-Node.js, Express 5, PostgreSQL 17, `pg` (raw SQL), `jsonwebtoken`, `bcryptjs`, `zod`, `helmet`, `express-rate-limit`, `pino`. Tests use Node's built-in test runner with `supertest`. CI runs on GitHub Actions.
+Node.js, Express 5, PostgreSQL 17, `pg` (raw SQL), `jsonwebtoken`, `bcryptjs`, `zod`, `helmet`, `express-rate-limit`, `pino`. Tests use Node's built-in test runner with `supertest`. CI runs on GitHub Actions. Deployed with nginx, Let's Encrypt (certbot), systemd and Docker on AWS EC2.
 
 ## API reference
 
@@ -130,7 +135,7 @@ node server.js
 curl http://localhost:3000/api/health
 ```
 
-Optional settings: `LOG_LEVEL` (default `info`), `RATE_LIMIT_MAX` (default `100` requests per 15 minutes per IP) and `NODE_ENV=production` (plain JSON logs).
+Optional settings: `LOG_LEVEL` (default `info`), `RATE_LIMIT_MAX` (default `100` requests per 15 minutes per IP), `HOST` (default `127.0.0.1`, the address the server listens on) and `NODE_ENV=production` (plain JSON logs).
 
 ## Running the tests
 
@@ -159,6 +164,17 @@ npm test
 
 The suite covers registration and login, JWT tampering and `alg: none` forgery, ownership checks between two users, input validation and mass assignment, overdrafts, idempotency, ten simultaneous withdrawals, refresh-token rotation and theft detection, logout, error handling, and CORS and security headers. GitHub Actions runs the same suite against a PostgreSQL service on every push.
 
+## Deployment
+
+The API runs on a single AWS EC2 instance (t3.micro, 2 vCPU, about 1 GB of memory, Ubuntu 24.04):
+
+- **nginx** is the only public entry point. It terminates TLS with a Let's Encrypt certificate (renewed automatically), redirects HTTP to HTTPS, limits request bodies, and proxies to the app. It overwrites `X-Forwarded-For` with the real client address, and the app trusts exactly one proxy hop, so rate limiting and logs see real client IPs.
+- **The app** runs as a non-root `systemd` service that restarts on failure and starts at boot. It listens on `127.0.0.1:3000` only.
+- **PostgreSQL** runs in Docker, bound to `127.0.0.1:5432`, with its data on a named volume and a restart policy.
+- **Firewall (security group):** ports 80 and 443 are open to the internet, SSH is restricted to a single IP, and ports 3000 and 5432 are not reachable from outside.
+- **Secrets** (JWT signing key, database password) are generated on the server into a `.env` file readable only by the service user. They are never committed to the repository.
+- **Updating:** `git pull && npm ci --omit=dev && sudo systemctl restart finapi`.
+
 ## Project structure
 
 ```
@@ -185,27 +201,29 @@ tests/                 Automated tests and helpers
 
 ## Performance
 
-Measured locally with `autocannon` (10 seconds, production mode, laptop, PostgreSQL in Docker, small dataset). Login is excluded because bcrypt is intentionally slow.
+Measured on the EC2 instance itself with `autocannon` (10 seconds per test, one run), against the app on `localhost`. Network, nginx and TLS time are not included. The load generator shares the instance's 2 vCPUs with the app and PostgreSQL, so these numbers are conservative. Login is excluded because bcrypt is intentionally slow.
 
 | Endpoint | Connections | p50 | p99 | Throughput |
 |---|---|---|---|---|
-| List accounts | 10 | 1 ms | 2 ms | ~8,400 req/s |
-| Get one account | 10 | 1 ms | 4 ms | ~6,800 req/s |
-| Transaction history | 10 | 1 ms | 9 ms | ~4,600 req/s |
-| List accounts | 50 | 7 ms | 17 ms | ~5,800 req/s |
+| Health check | 10 | 2 ms | 7 ms | ~3,400 req/s |
+| List accounts | 10 | 6 ms | 13 ms | ~1,450 req/s |
+| Get one account | 10 | 6 ms | 82 ms | ~1,100 req/s |
+| Transaction history (20 rows) | 10 | 11 ms | 18 ms | ~880 req/s |
+| List accounts | 50 | 31 ms | 49 ms | ~1,575 req/s |
 
-These are local numbers, not production numbers. Occasional single requests were slower (a maximum of 133 ms was seen during warm-up).
+Median response times stayed between 2 and 11 ms at 10 concurrent connections and 31 ms at 50. In the "get one account" run, occasional slow requests (maximum 172 ms) pushed the 99th percentile to 82 ms while the median stayed at 6 ms. A real client also pays for network latency and the TLS handshake on top of these figures.
 
 ## Known limitations
 
 - An access token stays valid until it expires (15 minutes) even after logout. That is inherent to stateless JWTs, and is why they are short-lived.
 - Refresh rotation is strict. If a legitimate client loses the response to a refresh and retries with the old token, it is treated as reuse and the user must log in again.
 - Rate-limit counters are kept in memory, so they reset on restart and are per server instance.
-- Behind a reverse proxy, `trust proxy` must be configured so rate limiting and logs see real client IPs.
-- No email verification, password reset, transfers between accounts, or role-based access.
+- Registration is open and there is no email verification, so a public instance can accumulate junk accounts. Rate limiting only slows this down.
+- Single instance: no high availability, and no automated database backups yet.
+- No password reset, transfers between accounts, or role-based access.
 
 ## Roadmap
 
-- Deploy to AWS EC2 behind nginx with HTTPS
-- Re-run the benchmark on the deployed instance
+- Automated deployment from GitHub Actions
+- Scheduled database backups
 - Optional: httpOnly cookie delivery for refresh tokens once a browser frontend exists
