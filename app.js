@@ -15,6 +15,11 @@ const allowedOrigins = (process.env.ALLOWED_ORIGINS || '')
 
 const app = express();
 
+// the app sits behind exactly one reverse proxy (nginx), so trust one hop of X-Forwarded-For.
+// without this every client looks like nginx's address, and rate limiting and logs
+// would treat all users as a single client
+app.set('trust proxy', 1);
+
 app.use(requestLogger);
 app.use(helmet());
 app.use(cors({ origin: allowedOrigins }));

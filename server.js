@@ -17,6 +17,10 @@ if (!process.env.DATABASE_URL) {
 const app = require('./app');
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-    logger.info({ port: PORT }, 'Server listening');
+// listen only on the loopback address: nginx on the same machine is the only thing that
+// should reach the app, and it also means X-Forwarded-For can't be faked by outside clients
+const HOST = process.env.HOST || '127.0.0.1';
+
+app.listen(PORT, HOST, () => {
+    logger.info({ host: HOST, port: PORT }, 'Server listening');
 });
